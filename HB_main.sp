@@ -33,7 +33,7 @@ char RW6[] = "Halloween.BlackCat";
 char ENT_CLSNAME_WHITELIST[] = {"tf_ammo_pack" // Medium ammo pack.
 };
 
-float g_BoostScale = 1.75;
+float g_BoostScale = 1.75; // JUMP boost scale. It is not a <const> for the sake of being able to edit it ingame.
 
 float vec_fSpawn[3] = { 368.891876, 572.114258, -366.968689 }; // First player's spawn worldpos.
 float vec_sSpawn[3] = { -350.0, 572.114258, -366.968689 }; // Second player's spawn worldpos.
@@ -53,7 +53,7 @@ int FIGHTERS[2];	  // int array that holds the two fighters in the arena.
 
 
 public Plugin myinfo = {
-	name = "Heavy Footsies?", 
+	name = "Kaputon Boxing", 
 	author = "Kaputon", 
 	description = "N/A", 
 	version = PLUGIN_VERSION, 
@@ -164,62 +164,12 @@ void RemoveClientFromQueue(int client)
 //=======================================================//
 //=======================================================//
 
-// The Main game loop.
-public Action Timer_MainLoop(Handle timer)
-{
-	int ACTIVE_PLAYERS = GetPlayers();
-	
-	// Game cannot function without at least 2 people.
-	if (ACTIVE_PLAYERS < 2)
-	{
-		CreateTimer(0.5, Timer_Setup, _, TIMER_REPEAT);
-		return Plugin_Stop;
-	}
-	//===//
-	
-	// If we haven't started. Gather first two fighters.
-	if(!STARTED)
-	{
-		GatherBeginFighters();
-		STARTED = true;
-	}
-	else if (STARTED) // If we have, this function is just gathering a new fighter.
-	{
-		for (int i = 0; i < sizeof(FIGHTERS); i++)
-		{
-			if (FIGHTERS[i] == 0)
-			{
-				FIGHTERS[i] = QUEUE.Get(QUEUE.Length - 1);
-				QUEUE.Erase(QUEUE.Length - 1);
-			}
-		}
-	}
-	//===//
-	
-	MixTeams(); // Make sure they are not the same team.
-	TeleportFighters(); // Go ahead and teleport our fighters to the arena.
-	
-	return Plugin_Stop; // Plugin hands reigns over to the Death event.
-}
-
 // Returns the speed of the client to pre-dash speed. 
 // (The reason it is a timer is due to the fact that it is always turned off seconds after being activated)
 Action Timer_ResetSpeed(Handle timer, int client)
 {
 	float CURRENT_SPEED = GetEntPropFloat(client, Prop_Data, "m_flMaxspeed");
 	SetEntPropFloat(client, Prop_Data, "m_flMaxspeed", (CURRENT_SPEED/DASH_SCALE));
-}
-
-// Beginning timer to set up the game.
-public Action Timer_Setup(Handle timer)
-{
-	if (GetPlayers() >= 2)
-	{
-		CreateTimer(MAIN_LOOP_TIME, Timer_MainLoop, _, TIMER_REPEAT);
-		return Plugin_Stop;
-	}
-
-	return Plugin_Continue;
 }
 
 // Resets every players double jumps.
@@ -406,36 +356,6 @@ public Action BoostChange(int client, int args)
 //=======================================================//
 //=======================================================//
 
-
-public void OnPluginStart()
-{
-	QUEUE = new ArrayList(MAXPLAYERS);
-	RegConsoleCmd("kb_boost_scale", BoostChange);
-	
-	// TODO: Figure out a more efficient way to deal with these sounds.
-	PrecacheScriptSound(WIN_SOUND);
-	PrecacheScriptSound(RW1);
-	PrecacheScriptSound(RW2);
-	PrecacheScriptSound(RW3); 
-	PrecacheScriptSound(RW4);
-	PrecacheScriptSound(RW5);
-	PrecacheScriptSound(DASH_SOUND);
-	HookEvent("player_changeclass", Event_PlayerClass);
-	HookEvent("player_death", Event_PlayerDeath);
-	HookEvent("player_spawn", Event_PlayerSpawn);
-	PrintToServer("[SM] Heavy Footsies Plugin Loaded.");
-	
-	for (int i = 1; i <= MAXPLAYERS; i++)
-	{
-		if (IsValidClient(i))
-		{
-			OnClientPutInServer(i);
-		}
-	}
-	
-	CreateTimer(5.0, Timer_Setup, _ , TIMER_REPEAT);
-}
-
 // Hook Players when they are put in the server.
 // This function serves as the client's entry point to the game.
 public void OnClientPutInServer(int client)
@@ -528,6 +448,120 @@ public Action OnPlayerRunCmd(int client, int &buttons, int &impulse, float vel[3
 	}
 }
 
+// Event that fires when a client takes damage.
+// This function solely exists to prevent non-FIGHTERS from damaging each other in the spectator booth.
+public Action OnTakeDamage(int client, int &attacker, int &inflictor, float &damage, int &damagetype, int &weapon, float damageForce[3], float damagePosition[3], int damagecustom)
+{
+	for (int i = 0; i < sizeof(FIGHTERS); i++)
+	{
+		if (client == FIGHTERS[i])
+		{
+			return Plugin_Continue;
+		}
+	}
+	return Plugin_Handled;
+}
+
+// Event that fires when the map is started.
+// This function does not do much but it may in the future.
+public void OnMapStart()
+{
+	char MAP_NAME[32];
+	GetCurrentMap(MAP_NAME, sizeof(MAP_NAME));
+	if (StrEqual(MAP_NAME, REQ_MAP))
+	{
+		PrintToServer("[SM] Required Map has been loaded.");
+	}
+}
+
+//=======================================================//
+//=======================================================//
+//=============== MAIN LOGIC SEQUENCE ===================//
+//=======================================================//
+//=======================================================//
+
+// OnPluginStart --> Timer_Setup --> Timer_MainLoop --> Wait for Event_PlayerDeath --> Go back to MainLoop//
+
+public void OnPluginStart()
+{
+	QUEUE = new ArrayList(MAXPLAYERS);
+	RegConsoleCmd("kb_boost_scale", BoostChange);
+	
+	// TODO: Figure out a more efficient way to deal with these sounds.
+	PrecacheScriptSound(WIN_SOUND);
+	PrecacheScriptSound(RW1);
+	PrecacheScriptSound(RW2);
+	PrecacheScriptSound(RW3); 
+	PrecacheScriptSound(RW4);
+	PrecacheScriptSound(RW5);
+	PrecacheScriptSound(DASH_SOUND);
+	HookEvent("player_changeclass", Event_PlayerClass);
+	HookEvent("player_death", Event_PlayerDeath);
+	HookEvent("player_spawn", Event_PlayerSpawn);
+	PrintToServer("[SM] Heavy Footsies Plugin Loaded.");
+	
+	for (int i = 1; i <= MAXPLAYERS; i++)
+	{
+		if (IsValidClient(i))
+		{
+			OnClientPutInServer(i);
+		}
+	}
+	
+	CreateTimer(5.0, Timer_Setup, _ , TIMER_REPEAT);
+}
+
+// Beginning timer to set up the game.
+// Wait here until we have 2 or more players.
+public Action Timer_Setup(Handle timer)
+{
+	if (GetPlayers() >= 2)
+	{
+		CreateTimer(MAIN_LOOP_TIME, Timer_MainLoop, _, TIMER_REPEAT);
+		return Plugin_Stop;
+	}
+
+	return Plugin_Continue;
+}
+
+// The Main game loop.
+public Action Timer_MainLoop(Handle timer)
+{
+	int ACTIVE_PLAYERS = GetPlayers();
+	
+	// Game cannot function without at least 2 people.
+	if (ACTIVE_PLAYERS < 2)
+	{
+		CreateTimer(0.5, Timer_Setup, _, TIMER_REPEAT);
+		return Plugin_Stop;
+	}
+	//===//
+	
+	// If we haven't started. Gather first two fighters.
+	if(!STARTED)
+	{
+		GatherBeginFighters();
+		STARTED = true;
+	}
+	else if (STARTED) // If we have, this function is just gathering a new fighter.
+	{
+		for (int i = 0; i < sizeof(FIGHTERS); i++)
+		{
+			if (FIGHTERS[i] == 0)
+			{
+				FIGHTERS[i] = QUEUE.Get(QUEUE.Length - 1);
+				QUEUE.Erase(QUEUE.Length - 1);
+			}
+		}
+	}
+	//===//
+	
+	MixTeams(); // Make sure they are not the same team.
+	TeleportFighters(); // Go ahead and teleport our fighters to the arena.
+	
+	return Plugin_Stop; // Plugin hands reigns over to the Death event.
+}
+
 // Event Hook that fires upon player death.
 // This event is a main part of the logic and deals with the PLAYER SCORES and PLAYER WIN condition.
 public Action Event_PlayerDeath(Event event, const char[] name, bool dontBroadcast)
@@ -590,34 +624,3 @@ public Action Event_PlayerDeath(Event event, const char[] name, bool dontBroadca
 	}
 	return Plugin_Handled;
 }
-
-// Event that fires when a client takes damage.
-// This function solely exists to prevent non-FIGHTERS from damaging each other in the spectator booth.
-public Action OnTakeDamage(int client, int &attacker, int &inflictor, float &damage, int &damagetype, int &weapon, float damageForce[3], float damagePosition[3], int damagecustom)
-{
-	for (int i = 0; i < sizeof(FIGHTERS); i++)
-	{
-		if (client == FIGHTERS[i])
-		{
-			return Plugin_Continue;
-		}
-	}
-	return Plugin_Handled;
-}
-
-// Event that fires when the map is started.
-// This function does not do much but it may in the future.
-public void OnMapStart()
-{
-	char MAP_NAME[32];
-	GetCurrentMap(MAP_NAME, sizeof(MAP_NAME));
-	if (StrEqual(MAP_NAME, REQ_MAP))
-	{
-		PrintToServer("[SM] Required Map has been loaded.");
-	}
-}
-
-
-
-
-
