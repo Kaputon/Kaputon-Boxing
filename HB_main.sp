@@ -4,7 +4,6 @@
 
 #include <sourcemod>
 #include <tf2_stocks>
-#include <tf2attributes>
 #include <adt_array>
 #include <sdkhooks>
 #include <sdktools>
