@@ -16,7 +16,7 @@
 
 #define PLUGIN_VERSION "0.00"
 #define MAX_PLAYERS 32
-#define REQ_MAP "kb_lakeside"
+#define REQ_MAP {"kb_lakeside", "kb_minecraft"}
 #define WIN_NUMBER 10
 #define MAIN_LOOP_TIME 3.5
 #define WIN_SOUND "Passtime.Crowd.Cheer" // Sound which plays when a player wins <WIN_NUMBER> rounds.
@@ -35,10 +35,10 @@ char ENT_CLSNAME_WHITELIST[] = {"tf_ammo_pack" // Medium ammo pack.
 
 float g_BoostScale = 1.75; // JUMP boost scale. It is not a <const> for the sake of being able to edit it ingame.
 
-float vec_fSpawn[3] = { 368.891876, 572.114258, -366.968689 }; // First player's spawn worldpos.
-float vec_sSpawn[3] = { -350.0, 572.114258, -366.968689 }; // Second player's spawn worldpos.
-float vec_fAngles[3] = { 5.821329, 179.373764, 0.000000 }; // First players spawn view angles.
-float vec_sAngles[3] = { 1.104859, -0.214165, 0.000000 }; // Second players spawn view angles.
+float vec_fSpawn[3]; // First player's spawn worldpos.
+float vec_sSpawn[3]; // Second player's spawn worldpos.
+float vec_fAngles[3]; // First players spawn view angles.
+float vec_sAngles[3]; // Second players spawn view angles.
 float vec_Vel[3] = { 0.0, 0.0, 0.0 }; // Both players velocity after teleporting.
 
 bool STARTED = false; // Toggled on when the first round is started.
@@ -164,6 +164,55 @@ void RemoveClientFromQueue(int client)
 //=======================================================//
 //=======================================================//
 
+
+// This function finds the 'point_teleport' entities.
+// TODO: Add 'point_teleport's to kb_lakeside and completely move off of manual teleportation.
+void FindTeleports(char[] MAP)
+{
+	bool FIRST_FOUND = false;
+	
+	if (StrEqual(MAP, "kb_lakeside"))
+	{
+		
+		float fSpawn[3] = { 368.891876, 572.114258, -366.968689 }; // First player's spawn worldpos.
+		float sSpawn[3] = { -350.0, 572.114258, -366.968689 }; // Second player's spawn worldpos.
+		float fAngles[3] = { 5.821329, 179.373764, 0.000000 }; // First players spawn view angles.
+		float sAngles[3] = { 1.104859, -0.214165, 0.000000 }; // Second players spawn view angles.
+		
+		vec_fSpawn = fSpawn;
+		vec_sSpawn = sSpawn;
+		vec_fAngles = fAngles;
+		vec_sAngles = sAngles;
+	}
+	else
+	{
+		
+		char classname[32]; // Buffer to store entity name in.
+		for (int i = 1; i <= GetMaxEntities(); i++) // Iterate through every possible entity
+		{
+			if (IsValidEdict(i))
+			{
+				GetEdictClassname(i, classname, sizeof(classname));
+				if (StrEqual(classname, "point_teleport")) // If the entity is equal to "point_teleport".
+				{ // There are two point_teleport entities, we need to get the vector pos and angle rotation of both and store them.
+					if (!FIRST_FOUND) 
+					{
+						FIRST_FOUND = true;
+						GetEntPropVector(i, Prop_Send, "m_vecOrigin", vec_fSpawn);
+						GetEntPropVector(i, Prop_Data, "m_angRotation", vec_fAngles);
+					}
+					else
+					{
+						GetEntPropVector(i, Prop_Send, "m_vecOrigin", vec_sSpawn);
+						GetEntPropVector(i, Prop_Data, "m_angRotation", vec_sAngles);
+					}
+				}
+			}		
+		}
+	}
+}
+
+
 // Returns the speed of the client to pre-dash speed. 
 // (The reason it is a timer is due to the fact that it is always turned off seconds after being activated)
 Action Timer_ResetSpeed(Handle timer, int client)
@@ -239,13 +288,16 @@ void PlayRandomSound(int iAttacker)
 }
 
 // Completely wipe all game data for next match. <iAttacker> for win sound.
-void CleanUp(int iAttacker)
+void CleanUp(int iAttacker = -1)
 {
 	FIGHTERS[0] = 0;
 	FIGHTERS[1] = 0;
-	EmitGameSoundToAll(WIN_SOUND, iAttacker);
-	SDKHooks_TakeDamage(iAttacker, 0, 0, 450.0);
-	TF2_RespawnPlayer(iAttacker);
+	if (!(iAttacker == -1))
+	{
+		EmitGameSoundToAll(WIN_SOUND, iAttacker);
+		SDKHooks_TakeDamage(iAttacker, 0, 0, 450.0);
+		TF2_RespawnPlayer(iAttacker);	
+	}
 	STARTED = false;
 	RestartQueue();
 	for (int i = 0; i < sizeof(PLR_SCORES); i++)
@@ -422,20 +474,19 @@ public Action OnPlayerRunCmd(int client, int &buttons, int &impulse, float vel[3
 {
 	if (IsFighter(client))
 	{
-		if ((buttons & IN_RELOAD) && !USED_DJ[client])
+		if ((buttons & IN_ATTACK3) && !USED_DJ[client]) // IN_ATTACK3 is set to middle click by default. Used for MVM Medic shields.
 		{
-			PrintToChatAll("[SM] Double Jump performed.");
 			USED_DJ[client] = true;
 			float cVel[3];
 			GetEntPropVector(client, Prop_Data, "m_vecVelocity", cVel);
 			
 			ScaleVector(cVel, g_BoostScale);
 			
-			cVel[2] += 62.00;
+			cVel[2] += 70.00;
 			
 			TeleportEntity(client, NULL_VECTOR, NULL_VECTOR, cVel);
 		}
-		if ((buttons & IN_ATTACK2) && !USED_DASH[client])
+		if ((buttons & IN_RELOAD) && !USED_DASH[client])
 		{
 			USED_DASH[client] = true;
 			EmitGameSoundToAll(DASH_SOUND, client);
@@ -450,8 +501,14 @@ public Action OnPlayerRunCmd(int client, int &buttons, int &impulse, float vel[3
 
 // Event that fires when a client takes damage.
 // This function solely exists to prevent non-FIGHTERS from damaging each other in the spectator booth.
+// [ADDED 3-20-22] : Remove Fall Damage
 public Action OnTakeDamage(int client, int &attacker, int &inflictor, float &damage, int &damagetype, int &weapon, float damageForce[3], float damagePosition[3], int damagecustom)
 {
+	if (damagetype & DMG_FALL) // If damage type is fall damage, ignore it.
+	{
+		return Plugin_Handled;
+	}
+	
 	for (int i = 0; i < sizeof(FIGHTERS); i++)
 	{
 		if (client == FIGHTERS[i])
@@ -468,10 +525,7 @@ public void OnMapStart()
 {
 	char MAP_NAME[32];
 	GetCurrentMap(MAP_NAME, sizeof(MAP_NAME));
-	if (StrEqual(MAP_NAME, REQ_MAP))
-	{
-		PrintToServer("[SM] Required Map has been loaded.");
-	}
+	FindTeleports(MAP_NAME);
 }
 
 //=======================================================//
@@ -532,6 +586,7 @@ public Action Timer_MainLoop(Handle timer)
 	// Game cannot function without at least 2 people.
 	if (ACTIVE_PLAYERS < 2)
 	{
+		CleanUp();
 		CreateTimer(0.5, Timer_Setup, _, TIMER_REPEAT);
 		return Plugin_Stop;
 	}
